@@ -100,32 +100,35 @@ def audit(path, *, determinant, dependent, examples=0, delimiter=",", limits=Non
             if key not in groups:
                 if len(groups) >= limits.max_groups:
                     raise AuditError("determinant group limit exceeded")
-                # n, per-dependent-tuple counts, optional first record ordinal.
-                groups[key] = [0, Counter(), number if examples else None]
+                # Keep a single representative until a second RHS tuple occurs.
+                # n, representative, optional per-tuple counts, first ordinal.
+                groups[key] = [0, value, None, number if examples else None]
             group = groups[key]
-            n, counts, first = group
-            previous = counts[value]
-            pairs += n - previous
-            if len(samples) < examples and len(counts) == 1 and not previous:
-                first_value = next(iter(counts))
-                samples.append(
-                    {
-                        "determinant_values": list(key),
-                        "first_record": first,
-                        "first_dependent_values": list(first_value),
-                        "conflicting_record": number,
-                        "conflicting_dependent_values": list(value),
-                    }
-                )
+            n, representative, counts, first = group
+            if counts is None and value != representative:
+                if len(samples) < examples:
+                    samples.append(
+                        {
+                            "determinant_values": list(key),
+                            "first_record": first,
+                            "first_dependent_values": list(representative),
+                            "conflicting_record": number,
+                            "conflicting_dependent_values": list(value),
+                        }
+                    )
+                counts = Counter({representative: n})
+                group[2] = counts
+            if counts is not None:
+                pairs += n - counts[value]
+                counts[value] += 1
             group[0] += 1
-            counts[value] += 1
             records += 1
     except (OSError, UnicodeError, csv.Error, OverflowError) as exc:
         raise AuditError("unreadable or invalid UTF-8 CSV input") from exc
     violating = affected = removals = repeated = 0
-    for n, counts, _ in groups.values():
+    for n, _, counts, _ in groups.values():
         repeated += n > 1
-        if len(counts) > 1:
+        if counts is not None:
             violating += 1
             affected += n
             removals += n - max(counts.values())
