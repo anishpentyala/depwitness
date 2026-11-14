@@ -43,6 +43,30 @@ def _columns(name, values):
     return result
 
 
+class _InputReader(io.RawIOBase):
+    """Bound and hash the bytes consumed by the incremental UTF-8 decoder."""
+
+    def __init__(self, source, limit):
+        self.source = source
+        self.limit = limit
+        self.count = 0
+        self.digest = hashlib.sha256()
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        data = self.source.read(min(len(buffer), self.limit - self.count + 1))
+        self.count += len(data)
+        if self.count > self.limit:
+            raise AuditError("input byte limit exceeded")
+        if b"\x00" in data:
+            raise AuditError("input must not contain NUL")
+        self.digest.update(data)
+        buffer[: len(data)] = data
+        return len(data)
+
+
 def audit(path, *, determinant, dependent, examples=0, delimiter=",", limits=None):
     """Return the full exact-string FD report, or raise AuditError.
 
@@ -70,59 +94,57 @@ def audit(path, *, determinant, dependent, examples=0, delimiter=",", limits=Non
     records = pairs = 0
     try:
         with source.open("rb") as stream:
-            raw = stream.read(limits.max_bytes + 1)
-        if len(raw) > limits.max_bytes:
-            raise AuditError("input byte limit exceeded")
-        text = raw.decode("utf-8-sig")
-        if "\x00" in text:
-            raise AuditError("input must not contain NUL")
-        reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, strict=True)
-        header = next(reader, None)
-        if not header or len(header) > limits.max_columns:
-            raise AuditError("missing header or input column limit exceeded")
-        if any(not x.strip() or len(x) > limits.max_field_chars for x in header):
-            raise AuditError("blank or oversized header name")
-        if len(set(header)) != len(header):
-            raise AuditError("duplicate header name")
-        if not set(determinant + dependent).issubset(header):
-            raise AuditError("selected column missing from header")
-        left = tuple(header.index(x) for x in determinant)
-        right = tuple(header.index(x) for x in dependent)
-        for number, row in enumerate(reader, 1):
-            if number > limits.max_records:
-                raise AuditError("input record limit exceeded")
-            if len(row) != len(header):
-                raise AuditError(f"wrong field count at data record {number}")
-            if any(len(x) > limits.max_field_chars for x in row):
-                raise AuditError(f"oversized field at data record {number}")
-            key = tuple(row[i] for i in left)
-            value = tuple(row[i] for i in right)
-            if key not in groups:
-                if len(groups) >= limits.max_groups:
-                    raise AuditError("determinant group limit exceeded")
-                # Keep a single representative until a second RHS tuple occurs.
-                # n, representative, optional per-tuple counts, first ordinal.
-                groups[key] = [0, value, None, number if examples else None]
-            group = groups[key]
-            n, representative, counts, first = group
-            if counts is None and value != representative:
-                if len(samples) < examples:
-                    samples.append(
-                        {
-                            "determinant_values": list(key),
-                            "first_record": first,
-                            "first_dependent_values": list(representative),
-                            "conflicting_record": number,
-                            "conflicting_dependent_values": list(value),
-                        }
-                    )
-                counts = Counter({representative: n})
-                group[2] = counts
-            if counts is not None:
-                pairs += n - counts[value]
-                counts[value] += 1
-            group[0] += 1
-            records += 1
+            bounded = _InputReader(stream, limits.max_bytes)
+            with io.TextIOWrapper(
+                io.BufferedReader(bounded), encoding="utf-8-sig", newline=""
+            ) as text:
+                reader = csv.reader(text, delimiter=delimiter, strict=True)
+                header = next(reader, None)
+                if not header or len(header) > limits.max_columns:
+                    raise AuditError("missing header or input column limit exceeded")
+                if any(not x.strip() or len(x) > limits.max_field_chars for x in header):
+                    raise AuditError("blank or oversized header name")
+                if len(set(header)) != len(header):
+                    raise AuditError("duplicate header name")
+                if not set(determinant + dependent).issubset(header):
+                    raise AuditError("selected column missing from header")
+                left = tuple(header.index(x) for x in determinant)
+                right = tuple(header.index(x) for x in dependent)
+                for number, row in enumerate(reader, 1):
+                    if number > limits.max_records:
+                        raise AuditError("input record limit exceeded")
+                    if len(row) != len(header):
+                        raise AuditError(f"wrong field count at data record {number}")
+                    if any(len(x) > limits.max_field_chars for x in row):
+                        raise AuditError(f"oversized field at data record {number}")
+                    key = tuple(row[i] for i in left)
+                    value = tuple(row[i] for i in right)
+                    if key not in groups:
+                        if len(groups) >= limits.max_groups:
+                            raise AuditError("determinant group limit exceeded")
+                        # Keep a single representative until a second RHS tuple occurs.
+                        # n, representative, optional per-tuple counts, first ordinal.
+                        groups[key] = [0, value, None, number if examples else None]
+                    group = groups[key]
+                    n, representative, counts, first = group
+                    if counts is None and value != representative:
+                        if len(samples) < examples:
+                            samples.append(
+                                {
+                                    "determinant_values": list(key),
+                                    "first_record": first,
+                                    "first_dependent_values": list(representative),
+                                    "conflicting_record": number,
+                                    "conflicting_dependent_values": list(value),
+                                }
+                            )
+                        counts = Counter({representative: n})
+                        group[2] = counts
+                    if counts is not None:
+                        pairs += n - counts[value]
+                        counts[value] += 1
+                    group[0] += 1
+                    records += 1
     except (OSError, UnicodeError, csv.Error, OverflowError) as exc:
         raise AuditError("unreadable or invalid UTF-8 CSV input") from exc
     violating = affected = removals = repeated = 0
@@ -152,5 +174,5 @@ def audit(path, *, determinant, dependent, examples=0, delimiter=",", limits=Non
         "examples": samples,
         "violating_groups_without_example": violating - len(samples),
         "settings": {"examples": examples, "delimiter": delimiter, "limits": dict(vars(limits))},
-        "input": {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)},
+        "input": {"sha256": bounded.digest.hexdigest(), "bytes": bounded.count},
     }

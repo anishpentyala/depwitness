@@ -98,17 +98,23 @@ unselected cells are copied to the report. Reports have `schema_version: 1`.
 
 These are acceptance caps, not hard RAM or runtime bounds. Python's own CSV
 field-size limit can also reject a field even if the requested character cap
-is larger. Input bytes and decoded text are retained while reading. The index
+is larger. Input is decoded and hashed incrementally instead of retaining the
+complete raw byte string and decoded text. CSV records, decoder buffers and the
+index still take memory; a large record can still be expensive. The index
 retains every distinct determinant/dependent tuple and its frequency, not every
-row or row pair. Memory grows with input bytes and distinct selected tuples and
+row or row pair. Memory grows with buffered input, distinct selected tuples and
 their lengths. A group that has only one dependent tuple keeps its count and
 representative directly, without a separate frequency dictionary. On its first
 conflict, it switches to a full per-tuple counter seeded with all prior repeats.
 This avoids that dictionary for consistent groups, but conflicting groups still
 need it. The switch adds some work and a representative reference, so this is
 not a promise of lower memory or faster execution on every input.
-A small example cap does not cap index memory. No disk backend or
-streaming-memory guarantee. No network code or telemetry.
+A small example cap does not cap index memory. Incremental input does not make
+the whole audit constant-memory, and the selected-tuple index has no disk
+backend. Every accepted input is consumed to EOF before a report is returned;
+late byte-limit, NUL, decoder, parser or source-read failures still fail the
+audit. If an input has several faults, the first reported diagnostic may change
+as validation runs while reading. No network code or telemetry.
 
 For selected tuple width `W`, scanning and hash-table aggregation take expected
 `O(bytes + records * W)` work, plus a final pass over distinct selected tuples.
