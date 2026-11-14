@@ -14,6 +14,8 @@ def main(argv=None):
     parser.add_argument("--dependent", action="append", required=True)
     parser.add_argument("--examples", type=int, default=0)
     parser.add_argument("--delimiter", default=",")
+    parser.add_argument("--storage", choices=("memory", "sqlite"), default="memory")
+    parser.add_argument("--temp-dir")
     for name, default in vars(Limits()).items():
         parser.add_argument("--" + name.replace("_", "-"), type=int, default=default)
     args = parser.parse_args(argv)
@@ -24,6 +26,8 @@ def main(argv=None):
             dependent=args.dependent,
             examples=args.examples,
             delimiter=args.delimiter,
+            storage=args.storage,
+            temp_dir=args.temp_dir,
             limits=Limits(**{name: getattr(args, name) for name in vars(Limits())}),
         )
         # Build the full serialization before emitting anything to stdout.
