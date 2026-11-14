@@ -150,4 +150,4 @@ def audit(path, *, determinant, dependent, examples=0, delimiter=",", limits=Non
         "violating_groups_without_example": violating - len(samples),
         "settings": {"examples": examples, "delimiter": delimiter, "limits": dict(vars(limits))},
         "input": {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)},
-}
+    }
