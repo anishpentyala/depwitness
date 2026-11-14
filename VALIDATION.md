@@ -118,3 +118,61 @@ unchanged plus six new methods), including the version assertion. Local final
 runs and neutral installed-wheel checks below supersede the 44-method snapshot
 above. Baseline negative-control and reader mutation evidence above concern the
 five reader methods, not the newly added version assertion.
+
+## 0.2.0: opt-in SQLite selected-tuple index
+
+Private candidate validation, November 14, 2026. Baseline is public main
+2faf9589a13a0c60d1fd1adbf5c2993333c52d1a (0.1.2). This adds `storage="sqlite"`
+and optional existing `temp_dir` to `audit`, plus matching CLI switches. Memory
+remains the default. JSON schema/settings, exact-string comparison, validation,
+counts, evidence order and input receipt are unchanged. No input snapshot,
+secure-erasure, hard memory bound or speed improvement is claimed.
+
+- 68 methods: 45 existing methods retained (the expected runtime version changes
+  to 0.2.0), plus 23 storage methods. All pass on actual CPython 3.9.25 / SQLite
+  3.50.4, 3.10.12 / 3.37.2, 3.11.17 / 3.53.1, 3.13.17 / 3.53.1, 3.14.9 /
+  3.53.1 and 3.15.1 / 3.53.1. These are Linux x86-64 local runs, not claims
+  about other operating systems or upstream CI.
+- New coverage includes full-report and byte-identical CLI JSON parity, 300
+  generated complete-report comparisons (seed 619204), one large conflicting
+  group, exact counts above 2**100, no ignored-value storage, POSIX permissions,
+  empty/header-only input, limit/late malformed/NUL/decode rejection, optional
+  SQLite unavailability, failed connect/write/fetch/iteration/close/cleanup,
+  explicit cursor close and explicit cleanup before return. Invalid or failed
+  storage never returns a complete report. Forced termination is not tested as
+  a cleanup guarantee and can leave files behind.
+- A separate 600-input generated probe (seed 527910) compares each candidate
+  backend to the actual baseline implementation: 1,200 complete-report equalities.
+  Includes composite tuples, exact empty/NULL/NA strings, Unicode, BOM, delimiters,
+  line endings, quoted records and example caps. This is finite testing, not
+  exhaustive equivalence. The baseline does not implement the new storage API;
+  unsupported-keyword errors are not used as correctness evidence.
+- Five deliberate production mutations each fail a focused test by one inspected
+  assertion with zero test errors on Python 3.14.9: zero frequency reads, missing
+  per-row group persistence, lost prior frequencies at promotion, omitted explicit
+  cleanup, and doubled group count. The cleanup mutant also emits the expected
+  ResourceWarning from implicit cleanup; that warning is not counted as a test
+  failure. Restored 68-method suite passes.
+- Ruff 0.17.5 check/format, wheel/sdist build, packaged Python module byte
+  comparison, and neutral installed-wheel 68-method tests on Python 3.9 and 3.14
+  pass. No registry upload or external adoption is claimed.
+
+### Measured trade-off
+
+Actual Python 3.14.9, three fresh processes for each input/backend, medians.
+Wall time is audit-only; peak RSS includes imports and audit. Inputs exist before
+launch. Wider limits are explicit in the benchmark, not new defaults. Complete
+counts/receipt are compared in every run. Selected values below have 80-character
+padding where stated. RSS is the Linux process high-water mark, not an allocation
+bound and not isolated index-only memory.
+
+| Input | Memory seconds | SQLite seconds | Memory RSS KiB | SQLite RSS KiB |
+| --- | ---: | ---: | ---: | ---: |
+| 120,000 distinct padded determinant/dependent tuples | 0.280829 | 3.289987 | 81,804 | 31,684 |
+| 60,000 distinct padded dependent tuples in one group | 0.109664 | 1.472797 | 33,952 | 30,960 |
+| 120,000 rows in ten repeated groups | 0.120156 | 1.638856 | 19,868 | 20,472 |
+
+SQLite was slower in all three shapes and used more RSS for the small-index
+shape. Its 8 MiB page-cache setting is not a process memory limit. Disk usage,
+filesystem cache and crash recovery are not characterized by this measurement.
+The benchmark and detailed local proof are retained with the review packet.

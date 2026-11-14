@@ -3,4 +3,4 @@
 from .core import AuditError, Limits, audit
 
 __all__ = ["AuditError", "Limits", "audit"]
-__version__ = "0.1.2"
+__version__ = "0.2.0"

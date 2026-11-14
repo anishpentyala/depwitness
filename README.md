@@ -110,13 +110,12 @@ This avoids that dictionary for consistent groups, but conflicting groups still
 need it. The switch adds some work and a representative reference, so this is
 not a promise of lower memory or faster execution on every input.
 A small example cap does not cap index memory. Incremental input does not make
-the whole audit constant-memory, and the selected-tuple index has no disk
-backend. Every accepted input is consumed to EOF before a report is returned;
+the whole audit constant-memory. Every accepted input is consumed to EOF before a report is returned;
 late byte-limit, NUL, decoder, parser or source-read failures still fail the
 audit. If an input has several faults, the first reported diagnostic may change
 as validation runs while reading. No network code or telemetry.
 
-For selected tuple width `W`, scanning and hash-table aggregation take expected
+With memory storage and selected tuple width `W`, scanning and hash-table aggregation take expected
 `O(bytes + records * W)` work, plus a final pass over distinct selected tuples.
 Hashing is expected, not a worst-case bound. A dense group with 10,000 rows split
 equally across two values represents 25,000,000 conflicting pairs without
@@ -128,6 +127,44 @@ resource or output failure. Invalid input never produces a partial success or
 partial violation report. Output I/O failures cannot retract bytes already
 written to a failing pipe or filesystem; they are not complete audit delivery.
 
+## Optional SQLite index
+
+The default `--storage memory` keeps the selected-tuple index in RAM. For a
+large number of distinct selected tuples, choose `--storage sqlite`:
+
+```sh
+depwitness examples/products.csv --determinant sku --determinant region \
+  --dependent category --storage sqlite --temp-dir /path/to/private/temp
+```
+
+SQLite storage requires Python's `sqlite3` module. If the Python installation
+lacks it, memory storage still works and requesting SQLite fails the audit.
+`--temp-dir` is optional and requires SQLite storage. It names an **existing**
+parent directory; the audit creates a private temporary subdirectory there.
+Only selected determinant/dependent tuples, counts and optional first-record
+ordinals enter the index, not ignored cell values or whole input rows. A group
+with many conflicting dependent values keeps its frequency counter on disk too.
+Counts remain exact Python integers, including beyond SQLite's integer range.
+Report content, example order, validation and acceptance limits are unchanged;
+the same complete input and options produce identical JSON on both backends.
+Storage selection is operational and is not included in the report's settings.
+
+This trades speed and disk space for less RAM in some high-cardinality cases.
+SQLite's page cache is configured to about 8 MiB, **not** a hard process-memory
+bound. Input records, decoder state and requested examples still use RAM. Small
+or repetitive inputs may use more RAM than the memory backend; all measured
+local SQLite runs were slower. The default limits still apply and are not raised
+automatically. See VALIDATION.md for the measured shapes and costs.
+
+The temporary directory is mode 700 and database mode 600 on POSIX systems.
+SQLite storage writes sensitive selected values to disk, even with `--examples 0`.
+Use a trusted location with enough free space. The connection is closed and the
+directory removed on normal completion and handled failures, including invalid
+late input. Storage/close/cleanup errors fail the audit without returning a
+report. A forced termination or crash can leave files behind. Cleanup is **not
+secure erasure** and does not promise to remove backups, swap or filesystem
+traces. This is not an encrypted store, resumable audit or persistent database.
+
 ## Library
 
 ```python
@@ -138,6 +175,8 @@ report = audit(
     determinant=['sku', 'region'],
     dependent=['category'],
     examples=0,
+    storage='sqlite',  # Optional; memory is the default.
+    # temp_dir='/path/to/private/temp',
     limits=Limits(max_records=50000),
 )
 print(report['counts']['conflicting_record_pairs'])
