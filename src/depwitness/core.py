@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,7 +68,31 @@ class _InputReader(io.RawIOBase):
         return len(data)
 
 
-def audit(path, *, determinant, dependent, examples=0, delimiter=",", limits=None):
+@contextmanager
+def _groups(storage, temp_dir):
+    if storage == "memory":
+        yield {}
+    else:
+        try:
+            from .disk import sqlite_groups
+        except ImportError as exc:
+            raise AuditError("sqlite storage is unavailable in this Python installation") from exc
+
+        with sqlite_groups(temp_dir) as groups:
+            yield groups
+
+
+def audit(
+    path,
+    *,
+    determinant,
+    dependent,
+    examples=0,
+    delimiter=",",
+    limits=None,
+    storage="memory",
+    temp_dir=None,
+):
     """Return the full exact-string FD report, or raise AuditError.
 
     Empty strings and spellings like NA or NULL are literal values. No rows
@@ -86,11 +111,20 @@ def audit(path, *, determinant, dependent, examples=0, delimiter=",", limits=Non
         limits = Limits()
     if type(limits) is not Limits:
         raise AuditError("limits must be a Limits instance")
+    if not isinstance(storage, str) or storage not in ("memory", "sqlite"):
+        raise AuditError("storage must be memory or sqlite")
+    if storage == "memory" and temp_dir is not None:
+        raise AuditError("temp_dir requires sqlite storage")
     try:
         source = Path(path)
     except TypeError as exc:
         raise AuditError("input path must be a string or path-like object") from exc
-    groups, samples = {}, []
+    with _groups(storage, temp_dir) as groups:
+        return _audit(source, determinant, dependent, examples, delimiter, limits, groups)
+
+
+def _audit(source, determinant, dependent, examples, delimiter, limits, groups):
+    samples = []
     records = pairs = 0
     try:
         with source.open("rb") as stream:
@@ -144,6 +178,7 @@ def audit(path, *, determinant, dependent, examples=0, delimiter=",", limits=Non
                         pairs += n - counts[value]
                         counts[value] += 1
                     group[0] += 1
+                    groups[key] = group
                     records += 1
     except (OSError, UnicodeError, csv.Error, OverflowError) as exc:
         raise AuditError("unreadable or invalid UTF-8 CSV input") from exc
