@@ -69,7 +69,7 @@ class _InputReader(io.RawIOBase):
 
 
 @contextmanager
-def _groups(storage, temp_dir):
+def _groups(storage, temp_dir, cleanup_stack=None):
     if storage == "memory":
         yield {}
     else:
@@ -78,7 +78,7 @@ def _groups(storage, temp_dir):
         except ImportError as exc:
             raise AuditError("sqlite storage is unavailable in this Python installation") from exc
 
-        with sqlite_groups(temp_dir) as groups:
+        with sqlite_groups(temp_dir, cleanup_stack=cleanup_stack) as groups:
             yield groups
 
 
@@ -163,10 +163,16 @@ def audit_many(
         source = Path(path)
     except TypeError as exc:
         raise AuditError("input path must be a string or path-like object") from exc
-    with ExitStack() as stack:
+    # Close every batch connection before removing any directory: recursive
+    # removal itself needs file descriptors, including after setup exhaustion.
+    with ExitStack() as cleanup_stack, ExitStack() as stack:
         states = [
             _RuleState(
-                left, right, examples, limits, stack.enter_context(_groups(storage, temp_dir))
+                left,
+                right,
+                examples,
+                limits,
+                stack.enter_context(_groups(storage, temp_dir, cleanup_stack)),
             )
             for left, right in policies
         ]
