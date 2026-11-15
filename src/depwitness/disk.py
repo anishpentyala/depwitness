@@ -132,8 +132,11 @@ class _DiskGroups:
 
 
 @contextmanager
-def sqlite_groups(temp_dir=None):
+def sqlite_groups(temp_dir=None, *, cleanup_stack=None):
     temporary = _call(TemporaryDirectory, prefix="depwitness-", dir=temp_dir)
+    # Batch audits defer these callbacks until all their connections close.
+    if cleanup_stack is not None:
+        cleanup_stack.callback(_call, temporary.cleanup)
     connection = None
     try:
         path = Path(temporary.name) / "dependency.sqlite3"
@@ -159,4 +162,5 @@ def sqlite_groups(temp_dir=None):
             if connection is not None:
                 _call(connection.close)
         finally:
-            _call(temporary.cleanup)
+            if cleanup_stack is None:
+                _call(temporary.cleanup)

@@ -210,3 +210,36 @@ benchmark or guarantee is claimed. SQLite creates one private database and
 connection per rule, with separate caches. The new total-group acceptance cap
 limits the sum across indexes; it is not a hard process-memory bound. Counts of
 minimum removals stay per-rule and cannot be summed into a joint repair claim.
+
+## Batch cleanup after descriptor exhaustion (0.3.1)
+
+A Linux/Python 3.10 subprocess with POSIX `RLIMIT_NOFILE=64`, 100 repeated
+supported rules and a three-record CSV reproduced a handled SQLite setup failure
+in 0.3.0. One private temporary directory with a zero-byte `dependency.sqlite3`
+remained after the call. No retained CSV values or partial successful report
+were observed. The failed setup's recursive directory cleanup needed a file
+descriptor while earlier rule connections were still open.
+
+Batch cleanup now closes every connection before attempting any directory
+removal, including directories from a later index whose setup failed. The same
+64-descriptor case still fails the audit, but leaves no temporary index and the
+CLI exits 2 without JSON. It does not increase the descriptor limit or make
+100-rule SQLite batches succeed under that limit. A 128-descriptor run also
+failed cleanly; 256 and 512 completed with unchanged reports. These observations
+are local, not portable descriptor thresholds or performance claims.
+
+The 90-test suite passed on Linux/Python 3.9, 3.10, 3.11, 3.13, 3.14 and 3.15.
+Five new tests cover connection/cleanup ordering on success and failed setup,
+close failure, cleanup failure and real isolated POSIX descriptor exhaustion for
+both API and CLI. The real limit test skips non-POSIX systems and unusually low
+hard limits. Deterministic ordering/failure tests run without that OS condition.
+Against unchanged 0.3.0, the new tests have three assertion failures and no setup
+errors. Restoring immediate batch cleanup or omitting explicit deferred cleanup
+each also produces three assertion failures, with no setup errors.
+
+Across 160 seeded CSV fixtures and both storage backends, 320 full batch rule
+lists (960 individual reports) remained byte-identical to 0.3.0. Source/wheel
+runtime bytes matched both neutral Python 3.9 and 3.14 installs, and all 90 tests
+passed from each installed wheel outside the checkout. No Windows or macOS
+resource-exhaustion result is claimed. Disk privacy, crash, cleanup-error and
+non-secure-erasure limits still apply.
