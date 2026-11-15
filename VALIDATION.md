@@ -176,3 +176,37 @@ SQLite was slower in all three shapes and used more RSS for the small-index
 shape. Its 8 MiB page-cache setting is not a process memory limit. Disk usage,
 filesystem cache and crash recovery are not characterized by this measurement.
 The benchmark and detailed local proof are retained with the review packet.
+
+## Single-pass rule batches, 2026-11-15 private preparation
+
+This extends the library/CLI to multiple declared rules. No hosted CI, public
+release, user adoption or performance claim is made for this private candidate.
+
+- 85 unittest methods (68 existing plus 17 batch methods) pass on actual Linux
+  CPython 3.9.25, 3.10.12, 3.11.17, 3.13.17 and 3.14.9. Existing single-rule
+  report, input-validation, compact-index and SQLite-cleanup tests still pass.
+- Batch tests cover exact ordered per-rule reports, generated parity, one input
+  open with full-byte receipt, late malformed/UTF-8/NUL input, invalid later
+  policies, shared and per-rule caps, later storage-setup cleanup, last-summary
+  failure with no CLI JSON, duplicate rules, header-only inputs and CLI exits.
+  The generated suite uses 100 fixtures, three rules and both storage backends.
+- A separate process importing the actual unchanged released source at
+  bcbf1356d871009d028a69dd29fb2bc5d60ae697 generated expected reports from
+  repeated single-rule calls. All 960 complete reports matched the batch output
+  exactly (160 seeded fixtures, three rules, both storage backends). This
+  checks preservation of existing behavior, not independent scientific truth.
+- Four deliberate production mutations cause assertion failures with no setup
+  or collection errors: skipping the last rule, accepting any passing rule
+  instead of all, disabling the total-group cap, and rereading the input once
+  per rule. Restoring the code restores all 85 passing methods. A mutant can
+  trigger several failing subtests; these are four mechanisms, not extra work
+  or contributions.
+- Ruff 0.17.5 check/format and wheel/sdist build pass. Neutral installed-wheel
+  runs outside the checkout pass all 85 methods on Python 3.9.25 and 3.14.9;
+  all four runtime Python files match source/wheel/installed bytes exactly.
+
+One shared CSV scan still performs separate per-rule aggregation. No speed/RAM
+benchmark or guarantee is claimed. SQLite creates one private database and
+connection per rule, with separate caches. The new total-group acceptance cap
+limits the sum across indexes; it is not a hard process-memory bound. Counts of
+minimum removals stay per-rule and cannot be summed into a joint repair claim.
