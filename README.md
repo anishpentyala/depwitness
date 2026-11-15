@@ -257,8 +257,13 @@ faster execution, lower total RAM, or lower disk use than separate calls.
 SQLite storage opens a separate private temporary database and connection per
 rule; each has its own approximately 8 MiB page cache. Many rules can therefore
 use more RAM, temporary files and open file descriptors. All databases are
-closed and removed on normal completion and handled failures, not securely
-erased. Existing disk sensitivity and crash caveats apply to every rule.
+closed before any of their temporary directories are removed, including when
+a later index fails during setup. Directory cleanup itself can need file
+descriptors, so closing every batch connection first avoids keeping earlier
+connections open during cleanup after descriptor exhaustion. Cleanup failures
+still reject the batch rather than return a report. Directories are removed on
+normal completion and handled failures, not securely erased. Existing disk
+sensitivity and crash caveats apply to every rule.
 
 The minimum-removal count in each report is for that rule alone. Never sum
 these counts to estimate a joint repair: the same removed row can resolve violations of several rules, so joint repair
