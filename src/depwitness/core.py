@@ -4,7 +4,7 @@ import csv
 import hashlib
 import io
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -98,10 +98,25 @@ def audit(
     Empty strings and spellings like NA or NULL are literal values. No rows
     are excluded, no types inferred, no trimming or Unicode normalization.
     """
+    determinant, dependent = _dependency(determinant, dependent)
+    limits = _options(examples, delimiter, limits, storage, temp_dir)
+    try:
+        source = Path(path)
+    except TypeError as exc:
+        raise AuditError("input path must be a string or path-like object") from exc
+    with _groups(storage, temp_dir) as groups:
+        return _audit(source, determinant, dependent, examples, delimiter, limits, groups)
+
+
+def _dependency(determinant, dependent):
     determinant = _columns("determinant", determinant)
     dependent = _columns("dependent", dependent)
     if set(determinant) & set(dependent):
         raise AuditError("determinant and dependent columns must be disjoint")
+    return determinant, dependent
+
+
+def _options(examples, delimiter, limits, storage, temp_dir):
     _integer("examples", examples, 0)
     if examples > 1000:
         raise AuditError("examples must be <= 1000")
@@ -115,17 +130,141 @@ def audit(
         raise AuditError("storage must be memory or sqlite")
     if storage == "memory" and temp_dir is not None:
         raise AuditError("temp_dir requires sqlite storage")
+    return limits
+
+
+def audit_many(
+    path,
+    *,
+    rules,
+    examples=0,
+    delimiter=",",
+    limits=None,
+    storage="memory",
+    temp_dir=None,
+    max_total_groups=100000,
+):
+    """Check 1-100 declared dependencies against one complete read of a CSV.
+
+    Each rule is a mapping with exactly determinant and dependent column lists.
+    Rules and reports retain caller order. Any invalid input or rule fails the
+    entire batch. Removal counts apply separately, never jointly across rules.
+    """
+    if not isinstance(rules, (list, tuple)) or not 1 <= len(rules) <= 100:
+        raise AuditError("rules must be a list or tuple containing 1 to 100 rules")
+    _integer("max_total_groups", max_total_groups, 1)
+    policies = []
+    for rule in rules:
+        if not isinstance(rule, dict) or set(rule) != {"determinant", "dependent"}:
+            raise AuditError("each rule must contain exactly determinant and dependent")
+        policies.append(_dependency(rule["determinant"], rule["dependent"]))
+    limits = _options(examples, delimiter, limits, storage, temp_dir)
     try:
         source = Path(path)
     except TypeError as exc:
         raise AuditError("input path must be a string or path-like object") from exc
-    with _groups(storage, temp_dir) as groups:
-        return _audit(source, determinant, dependent, examples, delimiter, limits, groups)
+    with ExitStack() as stack:
+        states = [
+            _RuleState(
+                left, right, examples, limits, stack.enter_context(_groups(storage, temp_dir))
+            )
+            for left, right in policies
+        ]
+        reports = _scan(source, states, delimiter, limits, max_total_groups)
+    return {
+        "schema_version": 1,
+        "passed": all(r["passed"] for r in reports),
+        "rules": reports,
+        "max_total_groups": max_total_groups,
+    }
+
+
+class _RuleState:
+    def __init__(self, determinant, dependent, examples, limits, groups):
+        self.determinant, self.dependent = determinant, dependent
+        self.examples, self.limits, self.groups = examples, limits, groups
+        self.samples, self.pairs = [], 0
+
+    def bind(self, header):
+        if not set(self.determinant + self.dependent).issubset(header):
+            raise AuditError("selected column missing from header")
+        self.left = tuple(header.index(x) for x in self.determinant)
+        self.right = tuple(header.index(x) for x in self.dependent)
+
+    def add(self, row, number):
+        groups, examples, limits = self.groups, self.examples, self.limits
+        key = tuple(row[i] for i in self.left)
+        value = tuple(row[i] for i in self.right)
+        if key not in groups:
+            if len(groups) >= limits.max_groups:
+                raise AuditError("determinant group limit exceeded")
+            # Keep a single representative until a second RHS tuple occurs.
+            # n, representative, optional per-tuple counts, first ordinal.
+            groups[key] = [0, value, None, number if examples else None]
+        group = groups[key]
+        n, representative, counts, first = group
+        if counts is None and value != representative:
+            if len(self.samples) < examples:
+                self.samples.append(
+                    {
+                        "determinant_values": list(key),
+                        "first_record": first,
+                        "first_dependent_values": list(representative),
+                        "conflicting_record": number,
+                        "conflicting_dependent_values": list(value),
+                    }
+                )
+            counts = Counter({representative: n})
+            group[2] = counts
+        if counts is not None:
+            self.pairs += n - counts[value]
+            counts[value] += 1
+        group[0] += 1
+        groups[key] = group
+
+    def report(self, records, delimiter, bounded):
+        violating = affected = removals = repeated = 0
+        for n, _, counts, _ in self.groups.values():
+            repeated += n > 1
+            if counts is not None:
+                violating += 1
+                affected += n
+                removals += n - max(counts.values())
+        return {
+            "schema_version": 1,
+            "passed": not violating,
+            "policy": {
+                "determinant": list(self.determinant),
+                "dependent": list(self.dependent),
+                "comparison": "exact_strings_including_empty_no_null_inference",
+            },
+            "counts": {
+                "records": records,
+                "determinant_groups": len(self.groups),
+                "repeated_determinant_groups": repeated,
+                "violating_groups": violating,
+                "affected_records": affected,
+                "conflicting_record_pairs": self.pairs,
+                "minimum_record_removals": removals,
+            },
+            "examples": self.samples,
+            "violating_groups_without_example": violating - len(self.samples),
+            "settings": {
+                "examples": self.examples,
+                "delimiter": delimiter,
+                "limits": dict(vars(self.limits)),
+            },
+            "input": {"sha256": bounded.digest.hexdigest(), "bytes": bounded.count},
+        }
 
 
 def _audit(source, determinant, dependent, examples, delimiter, limits, groups):
-    samples = []
-    records = pairs = 0
+    state = _RuleState(determinant, dependent, examples, limits, groups)
+    return _scan(source, [state], delimiter, limits)[0]
+
+
+def _scan(source, states, delimiter, limits, max_total_groups=None):
+    records = total_groups = 0
     try:
         with source.open("rb") as stream:
             bounded = _InputReader(stream, limits.max_bytes)
@@ -140,10 +279,8 @@ def _audit(source, determinant, dependent, examples, delimiter, limits, groups):
                     raise AuditError("blank or oversized header name")
                 if len(set(header)) != len(header):
                     raise AuditError("duplicate header name")
-                if not set(determinant + dependent).issubset(header):
-                    raise AuditError("selected column missing from header")
-                left = tuple(header.index(x) for x in determinant)
-                right = tuple(header.index(x) for x in dependent)
+                for state in states:
+                    state.bind(header)
                 for number, row in enumerate(reader, 1):
                     if number > limits.max_records:
                         raise AuditError("input record limit exceeded")
@@ -151,63 +288,13 @@ def _audit(source, determinant, dependent, examples, delimiter, limits, groups):
                         raise AuditError(f"wrong field count at data record {number}")
                     if any(len(x) > limits.max_field_chars for x in row):
                         raise AuditError(f"oversized field at data record {number}")
-                    key = tuple(row[i] for i in left)
-                    value = tuple(row[i] for i in right)
-                    if key not in groups:
-                        if len(groups) >= limits.max_groups:
-                            raise AuditError("determinant group limit exceeded")
-                        # Keep a single representative until a second RHS tuple occurs.
-                        # n, representative, optional per-tuple counts, first ordinal.
-                        groups[key] = [0, value, None, number if examples else None]
-                    group = groups[key]
-                    n, representative, counts, first = group
-                    if counts is None and value != representative:
-                        if len(samples) < examples:
-                            samples.append(
-                                {
-                                    "determinant_values": list(key),
-                                    "first_record": first,
-                                    "first_dependent_values": list(representative),
-                                    "conflicting_record": number,
-                                    "conflicting_dependent_values": list(value),
-                                }
-                            )
-                        counts = Counter({representative: n})
-                        group[2] = counts
-                    if counts is not None:
-                        pairs += n - counts[value]
-                        counts[value] += 1
-                    group[0] += 1
-                    groups[key] = group
+                    for state in states:
+                        previous = len(state.groups)
+                        state.add(row, number)
+                        total_groups += len(state.groups) - previous
+                        if max_total_groups is not None and total_groups > max_total_groups:
+                            raise AuditError("batch total determinant group limit exceeded")
                     records += 1
     except (OSError, UnicodeError, csv.Error, OverflowError) as exc:
         raise AuditError("unreadable or invalid UTF-8 CSV input") from exc
-    violating = affected = removals = repeated = 0
-    for n, _, counts, _ in groups.values():
-        repeated += n > 1
-        if counts is not None:
-            violating += 1
-            affected += n
-            removals += n - max(counts.values())
-    return {
-        "schema_version": 1,
-        "passed": not violating,
-        "policy": {
-            "determinant": list(determinant),
-            "dependent": list(dependent),
-            "comparison": "exact_strings_including_empty_no_null_inference",
-        },
-        "counts": {
-            "records": records,
-            "determinant_groups": len(groups),
-            "repeated_determinant_groups": repeated,
-            "violating_groups": violating,
-            "affected_records": affected,
-            "conflicting_record_pairs": pairs,
-            "minimum_record_removals": removals,
-        },
-        "examples": samples,
-        "violating_groups_without_example": violating - len(samples),
-        "settings": {"examples": examples, "delimiter": delimiter, "limits": dict(vars(limits))},
-        "input": {"sha256": bounded.digest.hexdigest(), "bytes": bounded.count},
-    }
+    return [state.report(records, delimiter, bounded) for state in states]
