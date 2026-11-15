@@ -203,3 +203,65 @@ CSV check with exact conflict counts, bounded opt-in witnesses and no runtime
 third-party dependencies. It does not claim a new algorithm, general superiority,
 external adoption or benchmark wins. Sources and boundaries are in EVIDENCE.md;
 local validation is in VALIDATION.md.
+
+## Check several declared rules in one read
+
+For a catalog with several declared mappings, `audit_many` parses, validates and
+hashes the input once, while keeping a separate index and evidence cap per rule:
+
+```python
+from depwitness import audit_many
+
+batch = audit_many(
+    'catalog.csv',
+    rules=[
+        {'determinant': ['sku', 'region'], 'dependent': ['category']},
+        {'determinant': ['sku'], 'dependent': ['brand']},
+    ],
+    examples=2,
+    max_total_groups=100000,
+)
+```
+
+Each item in `batch['rules']` has exactly the existing single-rule report shape,
+in caller order. The batch has its own `schema_version: 1`, `passed` flag and
+`max_total_groups`. It passes only if every rule passes. Duplicate rules are
+allowed and counted separately. All input validation runs to EOF even if a
+rule already has counterexamples; an invalid rule, late input failure, storage
+failure or cleanup failure rejects the entire batch, without a partial report.
+Every report describes the same bytes consumed in that one read. This does not
+make the file an atomic snapshot if another process rewrites it during reading.
+
+The CLI accepts repeated JSON rules instead of `--determinant`/`--dependent`:
+
+```sh
+depwitness catalog.csv \
+  --rule '{"determinant":["sku","region"],"dependent":["category"]}' \
+  --rule '{"determinant":["sku"],"dependent":["brand"]}' \
+  --examples 2 --max-total-groups 100000
+```
+
+Rules must be a list or tuple of 1-100 mappings containing exactly `determinant`
+and `dependent`, each a valid nonempty list or tuple of disjoint column names.
+CLI JSON rules reject duplicate keys and strings above 262144 characters.
+Single-rule CLI usage and report content are unchanged. Exit 0 means all rules
+hold, 1 means a complete batch with at least one violation, 2 means no complete
+batch or an output failure.
+
+`max_groups` applies to each rule; `max_total_groups` caps the sum across all
+rule indexes (default 100000), including duplicate rules. These are acceptance
+caps, not hard memory bounds. Each rule retains its own distinct selected
+values and up to `examples` counterexamples. Processing still does aggregation
+work for every rule on every record. Sharing the input pass does not guarantee
+faster execution, lower total RAM, or lower disk use than separate calls.
+SQLite storage opens a separate private temporary database and connection per
+rule; each has its own approximately 8 MiB page cache. Many rules can therefore
+use more RAM, temporary files and open file descriptors. All databases are
+closed and removed on normal completion and handled failures, not securely
+erased. Existing disk sensitivity and crash caveats apply to every rule.
+
+The minimum-removal count in each report is for that rule alone. Never sum
+these counts to estimate a joint repair: the same removed row can resolve violations of several rules, so joint repair
+can cost less than that sum. Deleting rows cannot introduce a new violation of
+these dependencies. This is declared-rule checking, not dependency discovery,
+data repair or an analysis recommendation.
