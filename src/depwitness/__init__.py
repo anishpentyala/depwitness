@@ -1,6 +1,6 @@
 """Counterexamples to a declared exact-string functional dependency."""
 
-from .core import AuditError, Limits, audit
+from .core import AuditError, Limits, audit, audit_many
 
-__all__ = ["AuditError", "Limits", "audit"]
-__version__ = "0.2.0"
+__all__ = ["AuditError", "Limits", "audit", "audit_many"]
+__version__ = "0.3.0"
