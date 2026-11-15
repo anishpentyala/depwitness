@@ -130,11 +130,11 @@ class BatchTests(unittest.TestCase):
         opened = []
 
         @contextmanager
-        def fail_second(storage, temp_dir):
+        def fail_second(storage, temp_dir, cleanup_stack=None):
             if opened:
                 raise AuditError("injected second index setup failure")
             opened.append(True)
-            with original(storage, temp_dir) as groups:
+            with original(storage, temp_dir, cleanup_stack) as groups:
                 yield groups
 
         with patch.object(core, "_groups", fail_second), self.assertRaises(AuditError):
