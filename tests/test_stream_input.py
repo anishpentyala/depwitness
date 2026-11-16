@@ -32,7 +32,9 @@ class StreamingInputTests(unittest.TestCase):
         return result
 
     def test_runtime_version_matches_distribution(self):
-        self.assertEqual(__version__, "0.3.0")
+        from importlib.metadata import version
+
+        self.assertEqual(__version__, version("depwitness"))
 
     def test_bounded_reads_and_read_once_receipt(self):
         raw = b"a,b,unused\r\n" + b"same,value," + b"x" * 1000 + b"\r\n"
