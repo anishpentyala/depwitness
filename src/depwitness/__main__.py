@@ -68,11 +68,42 @@ def main(argv=None):
         sys.stdout.flush()
         return 0 if report["passed"] else 1
     except (AuditError, MemoryError) as exc:
-        print(f"depwitness: {str(exc) or 'insufficient memory'}", file=sys.stderr)
+        try:
+            print(f"depwitness: {str(exc) or 'insufficient memory'}", file=sys.stderr, flush=True)
+        except OSError:
+            # The diagnostic destination can fail too; failure is still exit2.
+            pass
         return 2
-    except BrokenPipeError:
+    except OSError:
         return 2
+
+
+def cli():
+    """Process entrypoint: prevent a second failed flush overriding exit2.
+
+    Keep stream ownership unchanged for callers of main(). Only the executable
+    entrypoint closes an already-failing standard stream before shutdown.
+    """
+    try:
+        code = main()
+    except SystemExit as exc:
+        # argparse uses SystemExit for help and invalid arguments. Its buffered
+        # output still needs the same checked flush as an audit report.
+        code = exc.code
+    except OSError:
+        # argparse may itself fail while writing help or a diagnostic.
+        code = 2
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except OSError:
+            code = 2
+            try:
+                stream.close()
+            except OSError:
+                pass
+    return code
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(cli())

@@ -270,3 +270,15 @@ these counts to estimate a joint repair: the same removed row can resolve violat
 can cost less than that sum. Deleting rows cannot introduce a new violation of
 these dependencies. This is declared-rule checking, not dependency discovery,
 data repair or an analysis recommendation.
+
+
+### Output failures
+
+The CLI returns exit2 for output write or flush failures, including a full disk
+or a broken pipe. It also returns exit2 if its error diagnostic cannot be
+written. The executable entrypoints close an already-failing standard stream
+before Python shutdown so a second flush does not replace exit2 with exit120.
+Calling `main()` from Python does not close caller-owned streams; callers own
+any later flush/shutdown handling. No code can retract a report prefix already
+accepted by a destination before that destination fails, so exit2 must not be
+treated as a complete audit. No input, index or audit-count behavior changes.
