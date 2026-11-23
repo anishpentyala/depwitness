@@ -318,3 +318,7 @@ Calling `main()` from Python does not close caller-owned streams; callers own
 any later flush/shutdown handling. No code can retract a report prefix already
 accepted by a destination before that destination fails, so exit2 must not be
 treated as a complete audit. No input, index or audit-count behavior changes.
+
+## SQLite summary implementation
+
+The SQLite summary pass streams each stored group payload in insertion order without a second point lookup by key. Frequency counts for conflicting groups still stream separately, with Python integer arithmetic rather than SQLite SUM. On three controlled local Linux CPython 3.10.12 fixtures (10,000–15,000 rows), this reduced median complete-audit time by about 7–27%. These synthetic timings are not a promise for other inputs or machines; no lower memory usage is claimed.
