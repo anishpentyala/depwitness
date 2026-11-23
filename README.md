@@ -65,6 +65,20 @@ incorrect business rule, even if many rows follow it. A counterexample does not
 identify which value is true. Nothing is deleted, repaired, voted into truth,
 or uploaded.
 
+## Input file boundary
+
+CSV inputs must resolve to regular files. Symlinks to regular files are accepted.
+The opened descriptor, not a prior path check, is verified before reading.
+On systems with `O_NONBLOCK`, a FIFO with no producer is refused without waiting
+for one. Directories, devices, sockets and missing inputs fail with `AuditError`
+or CLI exit 2 and no report on stdout, in both single-rule and batch modes.
+Temporary SQLite storage is cleaned up on these failures too.
+
+This is not a universal read timeout: opening or reading an ordinary file on a
+slow or stalled filesystem can still wait. Pipes and process substitution are
+not supported CSV inputs. The byte hash and counts still cover the exact bytes
+read from one opened regular file; regular files may still change while read.
+
 ## Exact comparison, not inferred nulls or types
 
 - Repeat `--determinant` and `--dependent` for composite tuples. Both lists must
