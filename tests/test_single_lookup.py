@@ -57,10 +57,10 @@ class SingleLookupTests(unittest.TestCase):
         self.assertEqual(len(stored), 300)
         self.assertNotIn(0, stored)
         self.assertEqual(statements["SELECT 1 FROM groups WHERE k = ?"], 0)
-        # One lookup per input row; the existing summary pass reads each group.
+        # One lookup per input row; summary streams group payloads directly.
         self.assertEqual(
             statements["SELECT n, representative, promoted, first_record FROM groups WHERE k = ?"],
-            400,
+            300,
         )
 
     def test_first_row_and_repeat_retain_counts_and_ordinals(self):
@@ -121,5 +121,38 @@ class SingleLookupTests(unittest.TestCase):
                 dependent=["v"],
                 storage="sqlite",
                 temp_dir=self.temp,
+            )
+        self.assertEqual(list(self.temp.iterdir()), [])
+
+    def test_summary_payloads_stream_without_key_roundtrips(self):
+        from depwitness.disk import sqlite_groups
+
+        huge = 2**100
+        with sqlite_groups(self.temp) as groups:
+            groups[("é",)] = [huge, ("1.00",), None, 3]
+            groups[("b",)] = [5, ("x",), Counter({("x",): 3, ("y",): 2}), 7]
+            statements = []
+            execute = groups.execute
+
+            def count(sql, parameters=()):
+                statements.append(sql)
+                return execute(sql, parameters)
+
+            with (
+                patch.object(groups, "execute", count),
+                patch.object(
+                    _DiskGroups, "__getitem__", side_effect=AssertionError("summary lookup")
+                ),
+            ):
+                rows = list(groups.values())
+                self.assertEqual(rows[0], [huge, ("1.00",), None, 3])
+                self.assertEqual(rows[1][:2], [5, ("x",)])
+                self.assertEqual(rows[1][3], 7)
+                self.assertEqual(sorted(rows[1][2].values()), [2, 3])
+            self.assertEqual(
+                statements.count(
+                    "SELECT k, n, representative, promoted, first_record FROM groups ORDER BY rowid"
+                ),
+                1,
             )
         self.assertEqual(list(self.temp.iterdir()), [])
