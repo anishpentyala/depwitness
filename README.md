@@ -1,5 +1,33 @@
 # depwitness
 
+Find contradictory CSV mappings without confusing repeated rows with broken rules.
+
+[![Tests](https://github.com/anishpentyala/depwitness/actions/workflows/ci.yml/badge.svg)](https://github.com/anishpentyala/depwitness/actions)
+
+## Quickstart
+
+```sh
+python -m pip install "git+https://github.com/anishpentyala/depwitness.git"
+printf 'sku,category\n001,tools\n001,tools\n001,garden\n002,food\n' > products.csv
+depwitness products.csv --determinant sku --dependent category
+```
+
+The command exits 1 because SKU `001` maps to two categories. Selected fields
+from the full JSON report:
+
+```json
+{"counts": {"records": 4, "violating_groups": 1, "affected_records": 3, "conflicting_record_pairs": 2, "minimum_record_removals": 1}}
+```
+
+The repeated `001,tools` row is allowed. Both copies conflict with `001,garden`.
+The tool counts contradictions; it does not choose the correct category or
+repair your file. Raw cell examples stay off unless you pass `--examples N` with a positive integer N.
+
+Installation is currently from source. A PyPI release is being prepared; do not
+assume `pip install depwitness` is available until its package page is linked here.
+
+## Details
+
 Check whether a caller-declared CSV mapping is consistent: for each exact
 combination of determinant values, there must be one exact combination of
 dependent values. Repeated identical mappings are allowed. This is a functional
