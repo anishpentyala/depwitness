@@ -3,6 +3,8 @@
 import csv
 import hashlib
 import io
+import os
+import stat
 from collections import Counter
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -271,10 +273,26 @@ def _audit(source, determinant, dependent, examples, delimiter, limits, groups):
     return _scan(source, [state], delimiter, limits)[0]
 
 
+@contextmanager
+def _open_regular(source):
+    """Open once, refuse nonregular descriptors before reading any bytes."""
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(source, flags)
+    try:
+        stream = os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+    with stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise AuditError("input must be a regular file")
+        yield stream
+
+
 def _scan(source, states, delimiter, limits, max_total_groups=None):
     records = total_groups = 0
     try:
-        with source.open("rb") as stream:
+        with _open_regular(source) as stream:
             bounded = _InputReader(stream, limits.max_bytes)
             with io.TextIOWrapper(
                 io.BufferedReader(bounded), encoding="utf-8-sig", newline=""
