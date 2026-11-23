@@ -201,13 +201,15 @@ class _RuleState:
         groups, examples, limits = self.groups, self.examples, self.limits
         key = tuple(row[i] for i in self.left)
         value = tuple(row[i] for i in self.right)
-        if key not in groups:
+        try:
+            group = groups[key]
+        except KeyError:
             if len(groups) >= limits.max_groups:
                 raise AuditError("determinant group limit exceeded")
             # Keep a single representative until a second RHS tuple occurs.
             # n, representative, optional per-tuple counts, first ordinal.
-            groups[key] = [0, value, None, number if examples else None]
-        group = groups[key]
+            # Do not persist an empty group only to read and overwrite it below.
+            group = [0, value, None, number if examples else None]
         n, representative, counts, first = group
         if counts is None and value != representative:
             if len(self.samples) < examples:
