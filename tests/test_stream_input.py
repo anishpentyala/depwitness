@@ -50,7 +50,7 @@ class StreamingInputTests(unittest.TestCase):
 
         self_test = self
         stream = RecordingStream(raw)
-        with patch("depwitness.core.Path.open", return_value=stream) as opened:
+        with patch("depwitness.core._open_regular", return_value=stream) as opened:
             result = self.valid()
         self.assertEqual(opened.call_count, 1)
         self.assertTrue(stream.closed)
@@ -119,7 +119,7 @@ class StreamingInputTests(unittest.TestCase):
         for examples in (0, 1):
             stream = FailsLate(b"a,b\nk,v\nk,w\n" + b"k,v\n" * 5000)
             with (
-                patch("depwitness.core.Path.open", return_value=stream),
+                patch("depwitness.core._open_regular", return_value=stream),
                 self.assertRaises(AuditError),
             ):
                 audit(self.path, determinant=["a"], dependent=["b"], examples=examples)
