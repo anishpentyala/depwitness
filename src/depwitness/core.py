@@ -227,8 +227,9 @@ class _RuleState:
             counts = Counter({representative: n})
             group[2] = counts
         if counts is not None:
-            self.pairs += n - counts[value]
-            counts[value] += 1
+            previous = counts[value]
+            self.pairs += n - previous
+            counts[value] = previous + 1
         group[0] += 1
         groups[key] = group
 
