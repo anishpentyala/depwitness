@@ -121,10 +121,19 @@ class _DiskGroups:
                 counter[value] = count
 
     def values(self):
-        cursor = self.execute("SELECT k FROM groups ORDER BY rowid")
+        # Read each group payload in this cursor instead of looking it up again
+        # by key. Frequency values for promoted groups remain streamed on disk.
+        cursor = self.execute(
+            "SELECT k, n, representative, promoted, first_record FROM groups ORDER BY rowid"
+        )
         try:
-            for (encoded,) in cursor:
-                yield self[tuple(json.loads(encoded))]
+            for encoded, n, representative, promoted, first in cursor:
+                yield [
+                    int(n),
+                    tuple(json.loads(representative)),
+                    _DiskCounter(self, encoded) if promoted else None,
+                    int(first) if first is not None else None,
+                ]
         except sqlite3.Error as exc:
             raise AuditError("temporary dependency storage: " + str(exc)) from exc
         finally:
