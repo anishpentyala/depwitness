@@ -42,7 +42,9 @@ class BatchTests(unittest.TestCase):
                 self.assertFalse(actual["passed"])
 
     def test_one_open_and_one_complete_read(self):
-        original = Path.open
+        from depwitness.core import _open_regular
+
+        original = _open_regular
         opened = []
 
         def counted(path, *args, **kwargs):
@@ -50,9 +52,9 @@ class BatchTests(unittest.TestCase):
                 opened.append(args)
             return original(path, *args, **kwargs)
 
-        with patch.object(Path, "open", counted):
+        with patch("depwitness.core._open_regular", counted):
             result = self.batch()
-        self.assertEqual(opened, [("rb",)])
+        self.assertEqual(opened, [()])
         self.assertEqual(result["rules"][0]["input"]["bytes"], self.path.stat().st_size)
         self.assertTrue(all(r["input"] == result["rules"][0]["input"] for r in result["rules"]))
 
