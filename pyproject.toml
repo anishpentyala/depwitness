@@ -9,6 +9,13 @@ description = "Exact CSV functional-dependency counts and opt-in counterexamples
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
+authors = [{name = "Anish Pentyala"}]
+keywords = ["csv", "functional-dependency", "data-validation"]
+
+[project.urls]
+Homepage = "https://github.com/anishpentyala/depwitness"
+Repository = "https://github.com/anishpentyala/depwitness"
+Issues = "https://github.com/anishpentyala/depwitness/issues"
 
 [project.scripts]
 depwitness = "depwitness.__main__:cli"
