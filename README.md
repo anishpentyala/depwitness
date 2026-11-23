@@ -65,6 +65,19 @@ incorrect business rule, even if many rows follow it. A counterexample does not
 identify which value is true. Nothing is deleted, repaired, voted into truth,
 or uploaded.
 
+## Conflicting-group updates
+
+Once a determinant group has more than one dependent value, each later row
+reuses its dependent-value frequency for both pair counting and the increment.
+The SQLite backend therefore performs one frequency lookup rather than two for
+that update. Counts still use Python integers; this does not change reports,
+limits, examples, or which rows are admitted.
+
+On two synthetic 30,000-row conflicting-data fixtures, this removed one SQLite
+SELECT per already-promoted row and reduced local median audit time by about
+13–14%. A consistent-data control was essentially unchanged. These are local
+fixture measurements, not a general performance promise or a new storage mode.
+
 ## Input file boundary
 
 CSV inputs must resolve to regular files. Symlinks to regular files are accepted.
