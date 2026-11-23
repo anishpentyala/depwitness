@@ -149,6 +149,15 @@ Report content, example order, validation and acceptance limits are unchanged;
 the same complete input and options produce identical JSON on both backends.
 Storage selection is operational and is not included in the report's settings.
 
+The scan loads each group directly, without a separate membership query, and
+persists a newly seen group only after counting its first row. This removes
+redundant SQLite statements without changing report contents or acceptance
+limits. In a local fixture with 300 consistent records across 100 groups, the
+complete audit executed 906 SQL statements instead of 1,406, including setup
+and summary queries. This is a statement-count observation for that fixture,
+not a wall-time, RAM or general speedup claim. New dictionary groups now use a
+missing-key exception internally; the memory backend is not claimed faster.
+
 This trades speed and disk space for less RAM in some high-cardinality cases.
 SQLite's page cache is configured to about 8 MiB, **not** a hard process-memory
 bound. Input records, decoder state and requested examples still use RAM. Small
