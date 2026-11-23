@@ -249,7 +249,7 @@ class DiskTests(unittest.TestCase):
                 pass
 
         def execute(groups, sql, parameters=()):
-            if sql.startswith("SELECT 1 FROM groups"):
+            if sql.startswith("SELECT n, representative, promoted, first_record FROM groups"):
                 return Cursor()
             return original(groups, sql, parameters)
 
