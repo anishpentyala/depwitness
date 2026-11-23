@@ -295,7 +295,10 @@ class DiskTests(unittest.TestCase):
                 pass
 
         def execute(groups, sql, parameters=()):
-            if sql == "SELECT k FROM groups ORDER BY rowid":
+            if (
+                sql
+                == "SELECT k, n, representative, promoted, first_record FROM groups ORDER BY rowid"
+            ):
                 return Cursor()
             return original(groups, sql, parameters)
 
@@ -305,6 +308,39 @@ class DiskTests(unittest.TestCase):
         ):
             self.run_disk()
         self.assert_clean()
+
+    def test_summary_cursor_closes_on_success_and_failure(self):
+        self.rows([("a", "x")])
+        original = _DiskGroups.execute
+        summary = "SELECT k, n, representative, promoted, first_record FROM groups ORDER BY rowid"
+        for fail in (False, True):
+            closed = []
+
+            class Cursor:
+                def __init__(self, real):
+                    self.real = real
+
+                def __iter__(self):
+                    yield from self.real
+
+                def close(self, closed=closed, fail=fail):
+                    self.real.close()
+                    closed.append(True)
+                    if fail:
+                        raise sqlite3.OperationalError("summary cursor close failure")
+
+            def execute(groups, sql, parameters=()):
+                cursor = original(groups, sql, parameters)
+                return Cursor(cursor) if sql == summary else cursor
+
+            with patch.object(_DiskGroups, "execute", execute):
+                if fail:
+                    with self.assertRaisesRegex(AuditError, "summary cursor close failure"):
+                        self.run_disk()
+                else:
+                    self.assertTrue(self.run_disk()["passed"])
+            self.assertEqual(closed, [True])
+            self.assert_clean()
 
     def test_successful_cli_json_is_backend_independent(self):
         self.rows([("a", "x"), ("a", "y")])
