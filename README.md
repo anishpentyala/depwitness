@@ -7,7 +7,7 @@ Find contradictory CSV mappings without confusing repeated rows with broken rule
 ## Quickstart
 
 ```sh
-python -m pip install "git+https://github.com/anishpentyala/depwitness.git"
+python -m pip install depwitness
 printf 'sku,category\n001,tools\n001,tools\n001,garden\n002,food\n' > products.csv
 depwitness products.csv --determinant sku --dependent category
 ```
@@ -23,8 +23,7 @@ The repeated `001,tools` row is allowed. Both copies conflict with `001,garden`.
 The tool counts contradictions; it does not choose the correct category or
 repair your file. Raw cell examples stay off unless you pass `--examples N` with a positive integer N.
 
-Installation is currently from source. A PyPI release is being prepared; do not
-assume `pip install depwitness` is available until its package page is linked here.
+Install from [PyPI](https://pypi.org/project/depwitness/). Python 3.9 or later is required.
 
 ## Details
 
@@ -45,7 +44,7 @@ are opt-in. Python 3.9 or later, standard library only at runtime.
 python -m pip install .
 ```
 
-This is a source-installable tool, not a claimed package-registry release.
+The source checkout is optional; the quickstart above installs from PyPI.
 
 ## Check a product catalog
 
